@@ -1,36 +1,35 @@
 // ============================================================================
-//  HA + HMA Labouchère Inversé — JP
+//  HA + HMA Labouchère Inversé — Apex v2 — JP
 //  TradingView Pine Script v5
 //  Instrument : ETHUSDT.P  |  Timeframe : 10M–15M recommandé
 //
-//  ENTRÉES
-//  SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-//          SL = High bougie HA
-//  LONG  : Classic verte + HA verte + HA Close > HMA(50)
-//          SL = Low bougie classique
-//  Retournement SHORT↔LONG autorisé (signal opposé ferme + rouvre)
+//  ENTRÉE SHORT : HA rouge + HA Close < HMA(50)          [couleur classique ignorée]
+//  ENTRÉE LONG  : HA vert  + HA Close > HMA(50)          [couleur classique ignorée]
+//  Retournement SHORT↔LONG autorisé sur signal opposé
 //
-//  SORTIES
-//  EXIT SHORT : HA change rouge→vert ET HA Close > HMA(20)
-//  EXIT LONG  : HA change vert→rouge ET HA Close < HMA(20)
-//  SL / Breakeven : évaluation sur close de bougie (jamais intrabar)
+//  EXIT SHORT : HA change rouge→vert ET HA Close > HMA(20) → close candle classique
+//  EXIT LONG  : HA change vert→rouge ET HA Close < HMA(20) → close candle classique
 //
-//  GESTION DU RISQUE — LABOUCHÈRE INVERSÉ
-//  Séquence initiale [1,2,3] | Unité = X% de l'equity
-//  Gain → ajoute la mise à la fin (capitalise sur les séries gagnantes)
-//  Perte → retire premier + dernier (réduit l'exposition)
-//  Séquence vide → repart à [1,2,3]
-//  Risque max par trade plafonné à maxRiskPct% pour Apex
+//  SL SHORT  : High de la bougie HA au moment de l'entrée
+//  SL LONG   : Low  de la bougie classique au moment de l'entrée
+//  SL MAX    : 0.05% du capital compound (sinon réduction de la taille)
+//  BREAKEVEN : SL remonte au prix d'entrée dès que gain ≥ distance SL initiale
+//
+//  LABOUCHÈRE INVERSÉ
+//  Séquence initiale : [1, 1, 1, 1]  — mise = premier + dernier terme
+//  GAIN  → ajouter la mise à la fin (séquence s'allonge)
+//  PERTE → barrer premier et dernier (séquence rétrécit)
+//  Séquence vide → redémarrer à [1, 1, 1, 1]
+//  Chaque unité = labUnitPct% de l'equity | Risque max plafonné à maxRiskPct%
 //
 //  CIRCUIT BREAKERS APEX TRADER FUNDING ($50 000)
-//  → Stop si perte journalière > $900 (limite Apex : $1 000)
-//  → Stop si DD total > $1 800 (limite Apex : $2 000)
-//  → Fond rouge sur le graphique quand trading suspendu
+//  Perte journalière ≥ $900  → trading suspendu
+//  DD total           ≥ $1 800 → trading suspendu
 // ============================================================================
 
 //@version=5
 strategy(
-     title                   = "HA+HMA Labouchère Inversé — Apex",
+     title                   = "HA+HMA Labouchère Inversé — Apex v2",
      overlay                 = true,
      initial_capital         = 50000,
      currency                = currency.USD,
@@ -45,104 +44,103 @@ strategy(
 // ─────────────────────────────────────────────────────────────────────────────
 //  PARAMÈTRES
 // ─────────────────────────────────────────────────────────────────────────────
-hmaSlowLen   = input.int  (50,  "HMA Lente — période (ouverture)", minval=5,   group="HMA")
-hmaFastLen   = input.int  (20,  "HMA Rapide — période (sortie)",   minval=2,   group="HMA")
+hmaSlowLen     = input.int  (50,   "HMA Lente (50) — filtre ouverture",    minval=2, group="HMA")
+hmaFastLen     = input.int  (20,   "HMA Rapide (20) — déclencheur sortie", minval=2, group="HMA")
 
-labUnitPct   = input.float(0.5, "Unité Labouchère (% equity)",  step=0.1, minval=0.1, maxval=5.0, group="Labouchère Inversé") / 100.0
-maxRiskPct   = input.float(2.0, "Risque max par trade (% equity)", step=0.1, minval=0.1, maxval=10.0, group="Labouchère Inversé") / 100.0
+labUnitPct     = input.float(0.25, "Unité Labouchère (% equity)",   step=0.05, minval=0.05, group="Labouchère Inversé") / 100.0
+maxRiskPct     = input.float(2.0,  "Risque max par trade (% equity)", step=0.1,  minval=0.1,  group="Labouchère Inversé") / 100.0
+maxSLPct       = input.float(0.05, "SL max (% capital compound)",    step=0.01, minval=0.01, group="Labouchère Inversé") / 100.0
 
 apexDailyLimit = input.float(900.0,  "Arrêt si perte journalière ≥ ($)",  step=50,  group="Apex Circuit Breakers")
-apexDDLimit    = input.float(1800.0, "Arrêt si drawdown total ≥ ($)",     step=100, group="Apex Circuit Breakers")
+apexDDLimit    = input.float(1800.0, "Arrêt si drawdown total   ≥ ($)",   step=100, group="Apex Circuit Breakers")
 
-debugMode    = input.bool(false, "Mode debug (labels)", group="Debug")
+debugMode      = input.bool(false, "Mode debug (labels)", group="Debug")
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HEIKIN ASHI (calcul manuel)
+//  HEIKIN ASHI (calcul manuel — plus fiable que le graphique natif TV)
 // ─────────────────────────────────────────────────────────────────────────────
-haClose = (open + high + low + close) / 4.0
+haClose  = (open + high + low + close) / 4.0
 var float haOpenV = na
-haOpenV  := na(haOpenV[1]) ? (open + close) / 2.0 : (haOpenV[1] + haClose[1]) / 2.0
-haHigh    = math.max(high, math.max(haOpenV, haClose))
+haOpenV := na(haOpenV[1]) ? (open + close) / 2.0 : (haOpenV[1] + haClose[1]) / 2.0
+haHigh   = math.max(high, math.max(haOpenV, haClose))
 
 haIsGreen = haClose >= haOpenV
-haIsRed   = haClose <  haOpenV
+haIsRed   = haClose  < haOpenV
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HMA — calculées sur HA Close
+//  HMA (sur HA Close)
 // ─────────────────────────────────────────────────────────────────────────────
-hmaOnHA_slow = ta.hma(haClose, hmaSlowLen)   // HMA50 : filtre ouverture
-hmaOnHA_fast = ta.hma(haClose, hmaFastLen)   // HMA20 : déclencheur sortie
+hmaOnHA_slow = ta.hma(haClose, hmaSlowLen)   // HMA50 : filtre d'ouverture
+hmaOnHA_fast = ta.hma(haClose, hmaFastLen)   // HMA20 : déclencheur de sortie
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  COULEURS CLASSIQUES
-// ─────────────────────────────────────────────────────────────────────────────
-classicRed   = close < open
-classicGreen = close > open
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  LABOUCHÈRE INVERSÉ
-//  Séquence mémorisée entre les trades via un tableau persistant
-//  Mise courante = (premier + dernier élément) × labUnitPct × equity
-//  Gain  → push(betUnits) en fin de séquence
-//  Perte → remove(0) + remove(last) ; si vide → reset [1,2,3]
+//  LABOUCHÈRE INVERSÉ — séquence [1, 1, 1, 1]
+//
+//  Mise = premier + dernier terme
+//  Gain  → push(mise) en fin de séquence
+//  Perte → retire premier ET dernier terme (si séquence ≥ 2)
+//  Vide  → repart à [1, 1, 1, 1]
 // ─────────────────────────────────────────────────────────────────────────────
 var float[] labSeq       = array.new_float(0)
 var int     prevTrades   = 0
-var float   lastBetUnits = 4.0   // bet du trade en cours (1+3 au départ)
+var float   lastBetUnits = 2.0    // mise initiale : 1+1 = 2 unités
 var bool    labReady     = false
 
-// Initialisation une seule fois
 if not labReady
     array.push(labSeq, 1.0)
-    array.push(labSeq, 2.0)
-    array.push(labSeq, 3.0)
+    array.push(labSeq, 1.0)
+    array.push(labSeq, 1.0)
+    array.push(labSeq, 1.0)
     labReady := true
 
-// Mise courante en unités
+// Mise courante (en unités)
 labBetUnits() =>
     sz = array.size(labSeq)
-    sz == 0 ? 4.0 :
+    sz == 0 ? 2.0 :
      sz == 1 ? array.get(labSeq, 0) :
      array.get(labSeq, 0) + array.get(labSeq, sz - 1)
 
-// Détecter la clôture d'un trade et mettre à jour la séquence
+// Mise à jour après clôture d'un trade
 curTrades = strategy.closedtrades.size()
 if curTrades > prevTrades
     lastProfit = strategy.closedtrades.profit(curTrades - 1)
     if lastProfit > 0
-        // GAIN : ajoute la mise précédente à la fin (séquence s'allonge)
-        array.push(labSeq, math.max(lastBetUnits, 1.0))
+        // GAIN : ajoute la mise précédente à la fin
+        array.push(labSeq, math.max(math.round(lastBetUnits), 1.0))
     else
-        // PERTE : retire premier ET dernier (séquence rétrécit)
+        // PERTE : barre premier et dernier
         sz = array.size(labSeq)
         if sz >= 2
             array.remove(labSeq, 0)
             array.remove(labSeq, array.size(labSeq) - 1)
         else
             array.clear(labSeq)
-        // Séquence vide → réinitialisation
+        // Séquence vide → nouvelle série
         if array.size(labSeq) == 0
             array.push(labSeq, 1.0)
-            array.push(labSeq, 2.0)
-            array.push(labSeq, 3.0)
+            array.push(labSeq, 1.0)
+            array.push(labSeq, 1.0)
+            array.push(labSeq, 1.0)
     prevTrades := curTrades
 
-// Calcul de la mise en dollars pour ce prochain trade
-betUnits    = labBetUnits()
-riskDollars = math.min(betUnits * labUnitPct * strategy.equity,
-                       maxRiskPct             * strategy.equity)
+// Mise en dollars pour ce trade
+betUnits     = labBetUnits()
+riskDollars  = math.min(betUnits * labUnitPct * strategy.equity,
+                        maxRiskPct            * strategy.equity)
+
+// SL max en dollars (0.05% du capital compound)
+maxSLDollars = maxSLPct * strategy.equity
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CIRCUIT BREAKERS APEX
 // ─────────────────────────────────────────────────────────────────────────────
 var float dayStartEquity = strategy.initial_capital
 
-// Réinitialise l'equity de début de jour à chaque nouveau jour
 if ta.change(dayofmonth) != 0
     dayStartEquity := strategy.equity
 
-dailyPnL     = strategy.equity - dayStartEquity
-totalDD      = strategy.initial_capital - strategy.equity
+dailyPnL = strategy.equity - dayStartEquity
+totalDD  = strategy.initial_capital - strategy.equity
 
 tradingAllowed = dailyPnL > -apexDailyLimit and totalDD < apexDDLimit
 
@@ -154,20 +152,25 @@ isLong  = strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX D'ENTRÉE
+//  Couleur de la bougie classique IGNORÉE — seule la bougie HA compte
 // ─────────────────────────────────────────────────────────────────────────────
-shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed
-longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed
+shortEntry = haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed
+longEntry  = haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
-//  EXIT SHORT : HA change rouge→vert ET HA Close > HMA(20)
-//  EXIT LONG  : HA change vert→rouge ET HA Close < HMA(20)
+//  EXIT SHORT : HA change rouge→vert  ET HA Close > HMA20
+//  EXIT LONG  : HA change vert→rouge  ET HA Close < HMA20
 // ─────────────────────────────────────────────────────────────────────────────
 exitShort = haIsGreen and haIsRed[1]   and haClose > hmaOnHA_fast and strategy.position_size < 0
 exitLong  = haIsRed   and haIsGreen[1] and haClose < hmaOnHA_fast and strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  STOP LOSS + BREAKEVEN
+//  SL SHORT : High de la bougie HA à l'entrée
+//  SL LONG  : Low  de la bougie classique à l'entrée
+//  Taille de position réduite si sl_dist dépasse le SL max ($)
+//  Breakeven : SL remonte au prix d'entrée dès que gain ≥ distance SL initiale
 // ─────────────────────────────────────────────────────────────────────────────
 var float shortSL       = na
 var float longSL        = na
@@ -178,24 +181,32 @@ var float longSL_init   = na
 var bool  shortBE       = false
 var bool  longBE        = false
 
-// Breakeven SHORT : quand gain ≥ distance SL initiale → SL remonte à l'entrée
+// Breakeven SHORT
 if strategy.position_size < 0 and not shortBE and not na(shortSL) and not na(shortEntry_px)
     if close <= shortEntry_px - shortSL_init
         shortSL := shortEntry_px
         shortBE := true
 
-// Breakeven LONG : quand gain ≥ distance SL initiale → SL descend à l'entrée
+// Breakeven LONG
 if strategy.position_size > 0 and not longBE and not na(longSL) and not na(longEntry_px)
     if close >= longEntry_px + longSL_init
         longSL := longEntry_px
         longBE := true
 
-// SL touché (évaluation sur close uniquement)
+// SL touché (évaluation sur close uniquement — jamais intrabar)
 slHitShort = strategy.position_size < 0 and not na(shortSL) and high >= shortSL
 slHitLong  = strategy.position_size > 0 and not na(longSL)  and low  <= longSL
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EXÉCUTION — sorties avant entrées
+//  CALCUL DE LA QUANTITÉ
+//  qty = min(riskDollars, maxSLDollars) / sl_dist
+//  → la taille est réduite si le SL est trop large (dépasse le plafond 0.05%)
+// ─────────────────────────────────────────────────────────────────────────────
+calcQty(sl_dist) =>
+    sl_dist > 0 ? math.min(riskDollars, maxSLDollars) / sl_dist : na
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EXÉCUTION — sorties avant entrées (ordre obligatoire Pine Script)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Sorties TP
@@ -206,8 +217,8 @@ if exitShort
 
 if exitLong
     strategy.close("Long", comment="TP ✓")
-    longSL := na
-    longBE := false
+    longSL  := na
+    longBE  := false
 
 // Sorties SL / Breakeven
 if slHitShort
@@ -227,14 +238,14 @@ if shortEntry
         longSL := na
         longBE := false
     sl_dist = haHigh - close
-    if sl_dist > 0
-        qty = riskDollars / sl_dist
+    qty     = calcQty(sl_dist)
+    if not na(qty) and qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
         shortSL       := haHigh
         shortEntry_px := close
         shortSL_init  := sl_dist
         shortBE       := false
-        lastBetUnits  := betUnits   // mémorise pour la mise à jour Labouchère
+        lastBetUnits  := betUnits
 
 if longEntry
     if isShort
@@ -242,30 +253,30 @@ if longEntry
         shortSL := na
         shortBE := false
     sl_dist = close - low
-    if sl_dist > 0
-        qty = riskDollars / sl_dist
+    qty     = calcQty(sl_dist)
+    if not na(qty) and qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
         longSL        := low
         longEntry_px  := close
         longSL_init   := sl_dist
         longBE        := false
-        lastBetUnits  := betUnits   // mémorise pour la mise à jour Labouchère
+        lastBetUnits  := betUnits
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  DEBUG
 // ─────────────────────────────────────────────────────────────────────────────
 if debugMode
-    if classicGreen and haIsGreen
+    if haIsGreen
         if isLong or isShort
-            label.new(bar_index, low, "⏸ EN POSITION",
-                      style=label.style_label_up, color=color.gray, textcolor=color.white, size=size.tiny)
+            label.new(bar_index, low,  "⏸ EN POSITION",
+                      style=label.style_label_up,   color=color.gray,   textcolor=color.white, size=size.tiny)
         else if not (haClose > hmaOnHA_slow)
-            label.new(bar_index, low, "↑ HA<HMA50",
-                      style=label.style_label_up, color=color.yellow, textcolor=color.black, size=size.tiny)
-    if classicRed and haIsRed
+            label.new(bar_index, low,  "↑ HA<HMA50",
+                      style=label.style_label_up,   color=color.yellow, textcolor=color.black, size=size.tiny)
+    if haIsRed
         if isLong or isShort
             label.new(bar_index, high, "⏸ EN POSITION",
-                      style=label.style_label_down, color=color.gray, textcolor=color.white, size=size.tiny)
+                      style=label.style_label_down, color=color.gray,   textcolor=color.white, size=size.tiny)
         else if not (haClose < hmaOnHA_slow)
             label.new(bar_index, high, "↓ HA>HMA50",
                       style=label.style_label_down, color=color.yellow, textcolor=color.black, size=size.tiny)
@@ -281,54 +292,58 @@ plotshape(longEntry,  "▲ Long",       shape.triangleup,   location.belowbar, c
 plotshape(exitShort,  "✕ Exit Short", shape.xcross,       location.abovebar, color.new(color.orange, 0), size=size.tiny)
 plotshape(exitLong,   "✕ Exit Long",  shape.xcross,       location.belowbar, color.new(color.orange, 0), size=size.tiny)
 
-// Fond rouge si trading suspendu (circuit breaker Apex)
+// Fond rouge si trading suspendu (Apex circuit breaker)
 bgcolor(not tradingAllowed ? color.new(color.red, 88) : na, title="⛔ Apex : trading suspendu")
 
-// Lignes SL (pointillées)
+// Lignes SL pointillées
 var line slLine = na
 if shortEntry
-    slLine := line.new(bar_index, haHigh,  bar_index + 4, haHigh,
+    slLine := line.new(bar_index, haHigh, bar_index + 4, haHigh,
                        color=color.new(color.red,   50), style=line.style_dashed, width=1)
 if longEntry
-    slLine := line.new(bar_index, low,     bar_index + 4, low,
+    slLine := line.new(bar_index, low, bar_index + 4, low,
                        color=color.new(color.green, 50), style=line.style_dashed, width=1)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  TABLEAU DE BORD — coin haut droite
+//  TABLEAU DE BORD
 // ─────────────────────────────────────────────────────────────────────────────
-var table dash = table.new(position.top_right, 2, 7, border_width=1, border_color=color.new(color.gray, 50))
-
-labSeqStr = str.tostring(array.size(labSeq)) + " éléments | mise: " + str.tostring(betUnits, "0.#") + "u"
-riskStr   = str.tostring(riskDollars, "0.0") + "$ (" + str.tostring(betUnits * labUnitPct * 100, "0.00") + "%)"
+var table dash = table.new(position.top_right, 2, 8, border_width=1, border_color=color.new(color.gray, 50))
 
 if barstate.islast
-    // En-tête
-    table.cell(dash, 0, 0, "LABOUCHÈRE",  bgcolor=color.navy,  text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 0, labSeqStr,     bgcolor=color.navy,  text_color=color.white, text_size=size.small)
-    // Risque courant
-    table.cell(dash, 0, 1, "Risque trade",  bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 1, riskStr,         bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.small)
+    // Labouchère
+    labStr  = str.tostring(array.size(labSeq)) + " termes | mise: " + str.tostring(betUnits, "0.#") + "u"
+    riskStr = str.tostring(math.min(riskDollars, maxSLDollars), "0.0") + "$ (" +
+              str.tostring(math.min(riskDollars, maxSLDollars) / strategy.equity * 100, "0.00") + "%)"
+
+    table.cell(dash, 0, 0, "LABOUCHÈRE",   bgcolor=color.navy,                 text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, labStr,         bgcolor=color.navy,                 text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 1, "Risque trade", bgcolor=color.new(color.gray, 20),  text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, riskStr,        bgcolor=color.new(color.gray, 20),  text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 2, "SL max",       bgcolor=color.new(color.gray, 20),  text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(maxSLDollars, "0.0") + "$ (" + str.tostring(maxSLPct*100, "0.00") + "%)",
+               bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.small)
     // Equity
-    table.cell(dash, 0, 2, "Equity",  bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 2, str.tostring(strategy.equity, "0.0") + "$",
+    table.cell(dash, 0, 3, "Equity",       bgcolor=color.new(color.gray, 20),  text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(strategy.equity, "0.0") + "$",
                bgcolor=color.new(color.gray, 20), text_color=color.white, text_size=size.small)
     // P&L Journalier
-    dailyColor = dailyPnL < -apexDailyLimit * 0.7 ? color.red : color.new(color.gray, 20)
-    table.cell(dash, 0, 3, "P&L Jour",  bgcolor=dailyColor, text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 3, str.tostring(dailyPnL, "0.0") + "$",
-               bgcolor=dailyColor, text_color=color.white, text_size=size.small)
+    dColor = dailyPnL < -apexDailyLimit * 0.7 ? color.red : color.new(color.gray, 20)
+    table.cell(dash, 0, 4, "P&L Jour",     bgcolor=dColor, text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 4, str.tostring(dailyPnL, "0.0") + "$ / -" + str.tostring(apexDailyLimit, "0") + "$",
+               bgcolor=dColor, text_color=color.white, text_size=size.small)
     // DD Total
     ddColor = totalDD > apexDDLimit * 0.7 ? color.red : color.new(color.gray, 20)
-    table.cell(dash, 0, 4, "DD Total",  bgcolor=ddColor, text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 4, str.tostring(totalDD, "0.0") + "$",
+    table.cell(dash, 0, 5, "DD Total",     bgcolor=ddColor, text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, str.tostring(totalDD, "0.0") + "$ / " + str.tostring(apexDDLimit, "0") + "$",
                bgcolor=ddColor, text_color=color.white, text_size=size.small)
-    // Limites Apex
-    table.cell(dash, 0, 5, "Limite Jour / DD",
-               bgcolor=color.new(color.gray, 40), text_color=color.white, text_size=size.small)
-    table.cell(dash, 1, 5, str.tostring(apexDailyLimit, "0") + "$ / " + str.tostring(apexDDLimit, "0") + "$",
-               bgcolor=color.new(color.gray, 40), text_color=color.white, text_size=size.small)
-    // Statut trading
-    statusColor = tradingAllowed ? color.new(color.green, 10) : color.new(color.red, 10)
-    table.cell(dash, 0, 6, "Trading",  bgcolor=statusColor, text_color=color.white, text_size=size.small)
+    // Statut
+    statusBg = tradingAllowed ? color.new(color.green, 10) : color.new(color.red, 10)
+    table.cell(dash, 0, 6, "Trading",      bgcolor=statusBg, text_color=color.white, text_size=size.small)
     table.cell(dash, 1, 6, tradingAllowed ? "✅ ACTIF" : "🛑 SUSPENDU",
-               bgcolor=statusColor, text_color=color.white, text_size=size.small)
+               bgcolor=statusBg, text_color=color.white, text_size=size.small)
+    // Séquence actuelle
+    seqDisplay = array.size(labSeq) > 0 ? str.tostring(array.get(labSeq, 0), "0") : "?"
+    seqDisplay := seqDisplay + (array.size(labSeq) > 1 ? "–…–" + str.tostring(array.get(labSeq, array.size(labSeq)-1), "0") : "")
+    table.cell(dash, 0, 7, "Séquence",     bgcolor=color.new(color.purple, 20), text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 7, "[" + seqDisplay + "]",
+               bgcolor=color.new(color.purple, 20), text_color=color.white, text_size=size.small)
