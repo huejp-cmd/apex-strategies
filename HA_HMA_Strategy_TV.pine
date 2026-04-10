@@ -115,21 +115,47 @@ calcQty(slDist) =>
     slDist > 0 ? riskAmount / slDist : na
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EXÉCUTION — sorties avant entrées
+//  SUIVI DU STOP LOSS (évalué à la clôture de bougie, pas en intrabar)
 // ─────────────────────────────────────────────────────────────────────────────
 
+var float shortSL = na
+var float longSL  = na
+
+// SL SHORT touché : le High de la bougie a dépassé le niveau SL
+slHitShort = strategy.position_size < 0 and not na(shortSL) and high >= shortSL
+
+// SL LONG touché : le Low de la bougie est passé sous le niveau SL
+slHitLong  = strategy.position_size > 0 and not na(longSL)  and low  <= longSL
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EXÉCUTION — toutes les sorties sur close de bougie
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── SORTIES en premier ────────────────────────────────────────────────────────
 if exitShort
     strategy.close("Short", comment="TP ✓")
+    shortSL := na
+
 if exitLong
     strategy.close("Long", comment="TP ✓")
+    longSL := na
 
+if slHitShort
+    strategy.close("Short", comment="SL ✗")
+    shortSL := na
+
+if slHitLong
+    strategy.close("Long", comment="SL ✗")
+    longSL := na
+
+// ── ENTRÉES (seulement si aucune position) ────────────────────────────────────
 if shortEntry
     slLevel = haHigh
     dist    = slLevel - close
     qty     = calcQty(dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
-        strategy.exit("SL_Short", from_entry="Short", stop=slLevel)
+        shortSL := slLevel   // Mémoriser le SL pour vérification à chaque close
 
 if longEntry
     slLevel = low
@@ -137,7 +163,7 @@ if longEntry
     qty     = calcQty(dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
-        strategy.exit("SL_Long", from_entry="Long", stop=slLevel)
+        longSL := slLevel    // Mémoriser le SL pour vérification à chaque close
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AFFICHAGE
