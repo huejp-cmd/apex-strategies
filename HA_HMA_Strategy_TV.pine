@@ -76,9 +76,9 @@ bodyMin = atr * bodyMinPct / 100.0
 body    = math.abs(close - open)
 bodyOk  = body >= bodyMin
 
-// Confirmation HA : 2 bougies consécutives de même couleur
-haConfirmRed   = haIsRed   and haIsRed[1]    // 2 HA rouges de suite
-haConfirmGreen = haIsGreen and haIsGreen[1]  // 2 HA vertes de suite
+// Une seule bougie HA suffit
+haConfirmRed   = haIsRed
+haConfirmGreen = haIsGreen
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  COULEURS CLASSIQUES
