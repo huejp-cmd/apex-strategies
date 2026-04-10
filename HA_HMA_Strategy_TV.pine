@@ -46,8 +46,9 @@ strategy(
 // ─────────────────────────────────────────────────────────────────────────────
 hmaSlowLen = input.int  (50,  "HMA Lente (filtre entrée)",  minval=2,   group="HMA")
 hmaFastLen = input.int  (20,  "HMA Rapide (sortie)",        minval=2,   group="HMA")
-atrLen     = input.int  (14,  "ATR — période SL",           minval=1,   group="HMA")
+atrLen     = input.int  (14,  "ATR — période SL/TP",        minval=1,   group="HMA")
 slAtrMult  = input.float(1.5, "ATR — multiplicateur SL",    step=0.25, minval=0.25, group="HMA")
+tpAtrMult  = input.float(2.0, "ATR — multiplicateur TP fixe (0=désactivé)", step=0.25, minval=0.0, group="HMA")
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PARAMÈTRES LABOUCHÈRE (SOL29 v6)
@@ -187,6 +188,8 @@ exitLong  = haIsRed   and haIsGreen[1] and haClose < hmaOnHA_fast and strategy.p
 // ─────────────────────────────────────────────────────────────────────────────
 var float shortSL       = na
 var float longSL        = na
+var float shortTP       = na   // TP fixe ATR
+var float longTP        = na
 var float shortEntry_px = na
 var float longEntry_px  = na
 var float shortSL_init  = na
@@ -228,15 +231,43 @@ calcQty(entryPx, slPx) =>
 //  EXÉCUTION
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Sorties TP
-if exitShort
-    strategy.close("Short", comment="TP ✓")
+// TP fixe ATR (priorité maximale)
+tpHitShort = strategy.position_size < 0 and not na(shortTP) and tpAtrMult > 0 and low <= shortTP
+tpHitLong  = strategy.position_size > 0 and not na(longTP)  and tpAtrMult > 0 and high >= longTP
+
+if tpHitShort
+    strategy.close("Short", comment="TP-ATR ✓")
+    shortSL := na
+    shortTP := na
+    shortBE := false
+
+if tpHitLong
+    strategy.close("Long", comment="TP-ATR ✓")
+    longSL := na
+    longTP := na
+    longBE := false
+
+// TP signal HA (si TP fixe non déclenché)
+if exitShort and na(shortTP)
+    strategy.close("Short", comment="TP-HA ✓")
     shortSL := na
     shortBE := false
 
-if exitLong
-    strategy.close("Long", comment="TP ✓")
+if exitShort and not na(shortTP)
+    strategy.close("Short", comment="TP-HA ✓")
+    shortSL := na
+    shortTP := na
+    shortBE := false
+
+if exitLong and na(longTP)
+    strategy.close("Long", comment="TP-HA ✓")
     longSL  := na
+    longBE  := false
+
+if exitLong and not na(longTP)
+    strategy.close("Long", comment="TP-HA ✓")
+    longSL  := na
+    longTP  := na
     longBE  := false
 
 // Sorties SL / BE
@@ -256,11 +287,13 @@ if shortEntry
         strategy.close("Long", comment="↕ →Short")
         longSL := na
         longBE := false
-    slPx = close + atrValue * slAtrMult   // SL = entrée + ATR×mult (au-dessus)
+    slPx = close + atrValue * slAtrMult
+    tpPx = close - atrValue * tpAtrMult
     qty  = calcQty(close, slPx)
     if qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
         shortSL       := slPx
+        shortTP       := tpAtrMult > 0 ? tpPx : na
         shortEntry_px := close
         shortSL_init  := slPx - close
         shortBE       := false
@@ -270,11 +303,13 @@ if longEntry
         strategy.close("Short", comment="↕ →Long")
         shortSL := na
         shortBE := false
-    slPx = close - atrValue * slAtrMult   // SL = entrée - ATR×mult (en dessous)
+    slPx = close - atrValue * slAtrMult
+    tpPx = close + atrValue * tpAtrMult
     qty  = calcQty(close, slPx)
     if qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
         longSL        := slPx
+        longTP        := tpAtrMult > 0 ? tpPx : na
         longEntry_px  := close
         longSL_init   := close - slPx
         longBE        := false
