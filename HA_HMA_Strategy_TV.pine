@@ -227,14 +227,14 @@ debugMode = input.bool(false, "Mode debug (labels)", group="Debug")
 if debugMode
     // LONG potentiel bloqué
     if classicGreen and haIsGreen
-        if not noTrade
+        if (isLong or isShort)
             label.new(bar_index, low, "⏸ EN POSITION", style=label.style_label_up, color=color.gray,   textcolor=color.white, size=size.tiny)
         else if not (haClose > hmaOnHA_slow)
             label.new(bar_index, low, "↑ HA<HMA50",     style=label.style_label_up, color=color.yellow, textcolor=color.black, size=size.tiny)
 
     // SHORT potentiel bloqué
     if classicRed and haIsRed
-        if not noTrade
+        if (isLong or isShort)
             label.new(bar_index, high, "⏸ EN POSITION", style=label.style_label_down, color=color.gray,   textcolor=color.white, size=size.tiny)
         else if not (haClose < hmaOnHA_slow)
             label.new(bar_index, high, "↓ HA>HMA50",     style=label.style_label_down, color=color.yellow, textcolor=color.black, size=size.tiny)
