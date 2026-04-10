@@ -83,8 +83,8 @@ noTrade = strategy.opentrades == 0
 // SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
 shortEntry = classicRed   and haIsRed and haClose < hmaOnHA_slow and noTrade
 
-// LONG : Classic verte + Classic Close > HMA(50)  [sans filtre HA]
-longEntry  = classicGreen and close > hmaOnCL_slow              and noTrade
+// LONG : Classic verte + HA verte + HA Close > HMA(50)
+longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and noTrade
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
@@ -189,8 +189,7 @@ if longEntry
 //  AFFICHAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-plot(hmaOnCL_slow, "HMA 50 (close)", color=color.new(color.blue,   0), linewidth=2)
-plot(hmaOnHA_slow, "HMA 50 (HA)",   color=color.new(color.blue,  60), linewidth=1)
+plot(hmaOnHA_slow, "HMA 50 (HA)",   color=color.new(color.blue,   0), linewidth=2)
 plot(hmaOnHA_fast, "HMA 20 (HA)",   color=color.new(color.orange, 0), linewidth=1)
 
 plotshape(shortEntry, "▼ Short",      shape.triangledown, location.abovebar, color.new(color.red,    0), size=size.small)
