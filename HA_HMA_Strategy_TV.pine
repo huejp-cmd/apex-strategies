@@ -91,12 +91,22 @@ longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
-//  SHORT : HA vert + HA Close > HMA(20) → anticipe retournement haussier
-//  LONG  : HA rouge + HA Close < HMA(20) → anticipe retournement baissier
+//
+//  SHORT : HA VIRE AU VERT (premier bar vert après une série rouge)
+//          → sortie immédiate sans attendre HMA20
+//
+//  LONG  : HA VIRE AU ROUGE (premier bar rouge après une série verte)
+//          ET HA Close < HMA(20) → confirmation du retournement baissier
+//
+//  Note : pour le SHORT, on sort dès le changement de couleur HA
+//         car en bas de tendance le HA vert précède toujours le passage de HMA20
 // ─────────────────────────────────────────────────────────────────────────────
 
-exitShort = haIsGreen and haClose > hmaOnHA_fast and strategy.position_size < 0
-exitLong  = haIsRed   and haClose < hmaOnHA_fast and strategy.position_size > 0
+// EXIT SHORT : HA vire au vert (changement de couleur rouge→vert)
+exitShort = haIsGreen and haIsRed[1] and strategy.position_size < 0
+
+// EXIT LONG : HA vire au rouge ET HA Close < HMA(20)
+exitLong  = haIsRed and haClose < hmaOnHA_fast and strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GESTION DU STOP LOSS + BREAKEVEN
