@@ -1,24 +1,29 @@
 // ============================================================================
-//  HA + HMA Strategy v4 — JP
+//  HA + HMA Strategy v5 — JP
 //  TradingView Pine Script v5
 //  Instrument : ETHUSDT.P
 //  Timeframe  : 10M–15M recommandé
 //
 //  SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
 //          SL = High bougie HA
-//          TP = HA vert + HA Close > HMA(50) → close sur candle classique
+//          TP = HA vert + HA Close > HMA(20) → close candle classique
+//          Breakeven : quand gain = distance SL initiale → SL remonte à l'entrée
 //
 //  LONG  : Classic verte + Classic Close > HMA(50)
 //          SL = Low bougie classique
-//          TP = HA rouge + HA Close < HMA(50) → close sur candle classique
+//          TP = HA rouge + HA Close < HMA(20) → close candle classique
+//          Breakeven : quand gain = distance SL initiale → SL remonte à l'entrée
+//
+//  HMA50 = filtre d'ouverture (tendance long terme)
+//  HMA20 = signal de sortie (anticipation retournement court terme)
 //
 //  Capital : $50 000 | Risque : 2% par trade (compounding)
-//  UNE SEULE position à la fois — pas de filtre de pente
+//  Une seule position à la fois
 // ============================================================================
 
 //@version=5
 strategy(
-     title                   = "HA + HMA Strategy v4 — JP",
+     title                   = "HA + HMA Strategy v5 — JP",
      overlay                 = true,
      initial_capital         = 50000,
      currency                = currency.USD,
@@ -34,8 +39,9 @@ strategy(
 //  PARAMÈTRES
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaLen  = input.int  (50,  "HMA — période", minval=5, group="HMA")
-riskPct = input.float(2.0, "Risque par trade (%)", step=0.1, minval=0.1, maxval=10, group="Capital")
+hmaSlowLen = input.int  (50,  "HMA Lente — période (ouverture)",  minval=5, group="HMA")
+hmaFastLen = input.int  (20,  "HMA Rapide — période (sortie)",   minval=2, group="HMA")
+riskPct    = input.float(2.0, "Risque par trade (%)", step=0.1, minval=0.1, maxval=10, group="Capital")
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HEIKIN ASHI (calcul manuel)
@@ -51,11 +57,15 @@ haIsRed   = haClose  < haOpenV
 haIsGreen = haClose >= haOpenV
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HMA — une seule, appliquée sur HA Close et sur Close classique
+//  HMA
+//  hmaOnHA_slow : HMA(50) sur HA — filtre ouverture SHORT
+//  hmaOnCL_slow : HMA(50) sur close classique — filtre ouverture LONG
+//  hmaOnHA_fast : HMA(20) sur HA — déclencheur de sortie (les deux sens)
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaOnHA = ta.hma(haClose, hmaLen)   // HMA sur HA Close — signal + sortie SHORT
-hmaOnCL = ta.hma(close,   hmaLen)   // HMA sur Close classique — signal LONG
+hmaOnHA_slow = ta.hma(haClose, hmaSlowLen)
+hmaOnCL_slow = ta.hma(close,   hmaSlowLen)
+hmaOnHA_fast = ta.hma(haClose, hmaFastLen)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  COULEURS CLASSIQUES
@@ -71,19 +81,52 @@ classicGreen = close > open
 noTrade = strategy.opentrades == 0
 
 // SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-shortEntry = classicRed   and haIsRed and haClose < hmaOnHA and noTrade
+shortEntry = classicRed   and haIsRed and haClose < hmaOnHA_slow and noTrade
 
 // LONG : Classic verte + Classic Close > HMA(50)  [sans filtre HA]
-longEntry  = classicGreen and close > hmaOnCL              and noTrade
+longEntry  = classicGreen and close > hmaOnCL_slow              and noTrade
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
-//  Sortie SHORT : HA vert + HA Close > HMA(50)
-//  Sortie LONG  : HA rouge + HA Close < HMA(50)
+//  SHORT : HA vert + HA Close > HMA(20) → anticipe retournement haussier
+//  LONG  : HA rouge + HA Close < HMA(20) → anticipe retournement baissier
 // ─────────────────────────────────────────────────────────────────────────────
 
-exitShort = haIsGreen and haClose > hmaOnHA and strategy.position_size < 0
-exitLong  = haIsRed   and haClose < hmaOnHA and strategy.position_size > 0
+exitShort = haIsGreen and haClose > hmaOnHA_fast and strategy.position_size < 0
+exitLong  = haIsRed   and haClose < hmaOnHA_fast and strategy.position_size > 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  GESTION DU STOP LOSS + BREAKEVEN
+//  Évaluation sur close de bougie (pas intrabar)
+//  Breakeven : quand gain ≥ distance SL initiale → SL remonte au prix d'entrée
+// ─────────────────────────────────────────────────────────────────────────────
+
+var float shortSL        = na
+var float longSL         = na
+var float shortEntry_px  = na   // Prix d'entrée mémorisé pour le breakeven
+var float longEntry_px   = na
+var float shortSL_init   = na   // Distance SL initiale
+var float longSL_init    = na
+var bool  shortBE        = false // Breakeven déjà activé ?
+var bool  longBE         = false
+
+// ── Breakeven SHORT ───────────────────────────────────────────────────────────
+// Condition : close est descendu d'au moins (SL distance) sous l'entrée
+if strategy.position_size < 0 and not shortBE and not na(shortSL) and not na(shortEntry_px)
+    if close <= shortEntry_px - shortSL_init
+        shortSL := shortEntry_px   // SL remonte au prix d'entrée
+        shortBE := true
+
+// ── Breakeven LONG ────────────────────────────────────────────────────────────
+// Condition : close est monté d'au moins (SL distance) au-dessus de l'entrée
+if strategy.position_size > 0 and not longBE and not na(longSL) and not na(longEntry_px)
+    if close >= longEntry_px + longSL_init
+        longSL := longEntry_px     // SL descend au prix d'entrée
+        longBE := true
+
+// ── SL touché ? ───────────────────────────────────────────────────────────────
+slHitShort = strategy.position_size < 0 and not na(shortSL) and high >= shortSL
+slHitLong  = strategy.position_size > 0 and not na(longSL)  and low  <= longSL
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CALCUL QUANTITÉ (2% risk compounding)
@@ -94,63 +137,68 @@ calcQty(slDist) =>
     slDist > 0 ? riskAmount / slDist : na
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  STOP LOSS — évalué sur close de bougie (pas intrabar)
-// ─────────────────────────────────────────────────────────────────────────────
-
-var float shortSL = na
-var float longSL  = na
-
-slHitShort = strategy.position_size < 0 and not na(shortSL) and high >= shortSL
-slHitLong  = strategy.position_size > 0 and not na(longSL)  and low  <= longSL
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  EXÉCUTION — sorties avant entrées
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Sorties TP ────────────────────────────────────────────────────────────────
 if exitShort
     strategy.close("Short", comment="TP ✓")
     shortSL := na
+    shortBE := false
 
 if exitLong
     strategy.close("Long", comment="TP ✓")
     longSL := na
+    longBE := false
 
+// ── Sorties SL ────────────────────────────────────────────────────────────────
 if slHitShort
-    strategy.close("Short", comment="SL ✗")
+    beLabel = shortBE ? "BE ✗" : "SL ✗"
+    strategy.close("Short", comment=beLabel)
     shortSL := na
+    shortBE := false
 
 if slHitLong
-    strategy.close("Long", comment="SL ✗")
+    beLabel = longBE ? "BE ✗" : "SL ✗"
+    strategy.close("Long", comment=beLabel)
     longSL := na
+    longBE := false
 
+// ── Entrées ───────────────────────────────────────────────────────────────────
 if shortEntry
-    slLevel = haHigh
-    dist    = slLevel - close
-    qty     = calcQty(dist)
+    sl_dist      = haHigh - close
+    qty          = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
-        shortSL := slLevel
+        shortSL       := haHigh
+        shortEntry_px := close
+        shortSL_init  := sl_dist
+        shortBE       := false
 
 if longEntry
-    slLevel = low
-    dist    = close - slLevel
-    qty     = calcQty(dist)
+    sl_dist      = close - low
+    qty          = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
-        longSL := slLevel
+        longSL        := low
+        longEntry_px  := close
+        longSL_init   := sl_dist
+        longBE        := false
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AFFICHAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-plot(hmaOnCL, "HMA 50 (close)", color=color.new(color.blue,  0), linewidth=2)
-plot(hmaOnHA, "HMA 50 (HA)",   color=color.new(color.blue, 60), linewidth=1)
+plot(hmaOnCL_slow, "HMA 50 (close)", color=color.new(color.blue,   0), linewidth=2)
+plot(hmaOnHA_slow, "HMA 50 (HA)",   color=color.new(color.blue,  60), linewidth=1)
+plot(hmaOnHA_fast, "HMA 20 (HA)",   color=color.new(color.orange, 0), linewidth=1)
 
 plotshape(shortEntry, "▼ Short",      shape.triangledown, location.abovebar, color.new(color.red,    0), size=size.small)
 plotshape(longEntry,  "▲ Long",       shape.triangleup,   location.belowbar, color.new(color.green,  0), size=size.small)
 plotshape(exitShort,  "✕ Exit Short", shape.xcross,       location.abovebar, color.new(color.orange, 0), size=size.tiny)
 plotshape(exitLong,   "✕ Exit Long",  shape.xcross,       location.belowbar, color.new(color.orange, 0), size=size.tiny)
 
+// Niveau SL (pointillé) et Breakeven (ligne pleine) visibles sur le graphique
 var line slLine = na
 if shortEntry
     slLine := line.new(bar_index, haHigh, bar_index + 3, haHigh, color=color.new(color.red,   50), style=line.style_dashed, width=1)
