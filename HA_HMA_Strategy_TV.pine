@@ -1,24 +1,24 @@
 // ============================================================================
-//  HA + HMA Strategy v3 — JP
+//  HA + HMA Strategy v4 — JP
 //  TradingView Pine Script v5
 //  Instrument : ETHUSDT.P
 //  Timeframe  : 10M–15M recommandé
 //
-//  SHORT : Classic rouge + HA rouge (×2 consécutives) + HA Close < HMA(50)
-//          + HMA(50) en pente descendante + corps > X% ATR
-//          SL = High bougie HA | TP = HA vert + HA Close > HMA(20)
+//  SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
+//          SL = High bougie HA
+//          TP = HA vert + HA Close > HMA(50) → close sur candle classique
 //
 //  LONG  : Classic verte + Classic Close > HMA(50)
-//          + HMA(50) en pente montante + corps > X% ATR
-//          SL = Low bougie classique | TP = HA rouge + HA Close < HMA(20)
+//          SL = Low bougie classique
+//          TP = HA rouge + HA Close < HMA(50) → close sur candle classique
 //
 //  Capital : $50 000 | Risque : 2% par trade (compounding)
-//  UNE SEULE position à la fois
+//  UNE SEULE position à la fois — pas de filtre de pente
 // ============================================================================
 
 //@version=5
 strategy(
-     title                   = "HA + HMA Strategy v3 — JP",
+     title                   = "HA + HMA Strategy v4 — JP",
      overlay                 = true,
      initial_capital         = 50000,
      currency                = currency.USD,
@@ -34,10 +34,8 @@ strategy(
 //  PARAMÈTRES
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaSlowLen  = input.int  (50,  "HMA Lente — période",           minval=5,   group="HMA")
-hmaFastLen  = input.int  (20,  "HMA Rapide — période (sortie)", minval=2,   group="HMA")
-
-riskPct     = input.float(2.0, "Risque par trade (%)",          step=0.1, minval=0.1, maxval=10, group="Capital")
+hmaLen  = input.int  (50,  "HMA — période", minval=5, group="HMA")
+riskPct = input.float(2.0, "Risque par trade (%)", step=0.1, minval=0.1, maxval=10, group="Capital")
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HEIKIN ASHI (calcul manuel)
@@ -53,24 +51,11 @@ haIsRed   = haClose  < haOpenV
 haIsGreen = haClose >= haOpenV
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HMA
+//  HMA — une seule, appliquée sur HA Close et sur Close classique
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaSlowHA = ta.hma(haClose, hmaSlowLen)
-hmaFastHA = ta.hma(haClose, hmaFastLen)
-hmaSlowCL = ta.hma(close,   hmaSlowLen)
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  FILTRES
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Pente HMA : SHORT si HMA descend, LONG si HMA monte
-hmaBearish = hmaSlowHA < hmaSlowHA[1]   // HMA(HA) en baisse  → confirme SHORT
-hmaBullish = hmaSlowCL > hmaSlowCL[1]   // HMA(close) en hausse → confirme LONG
-
-// Une seule bougie HA suffit
-haConfirmRed   = haIsRed
-haConfirmGreen = haIsGreen
+hmaOnHA = ta.hma(haClose, hmaLen)   // HMA sur HA Close — signal + sortie SHORT
+hmaOnCL = ta.hma(close,   hmaLen)   // HMA sur Close classique — signal LONG
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  COULEURS CLASSIQUES
@@ -85,18 +70,20 @@ classicGreen = close > open
 
 noTrade = strategy.opentrades == 0
 
-// SHORT : Classic rouge + 2 HA rouges consécutives + HA sous HMA50 + HMA descend + corps ok
-shortEntry = classicRed   and haConfirmRed   and haClose < hmaSlowHA and hmaBearish and noTrade
+// SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
+shortEntry = classicRed   and haIsRed and haClose < hmaOnHA and noTrade
 
-// LONG : Classic verte + Classic > HMA50 + HMA monte (sans confirmation HA)
-longEntry  = classicGreen and close > hmaSlowCL               and hmaBullish and noTrade
+// LONG : Classic verte + Classic Close > HMA(50)  [sans filtre HA]
+longEntry  = classicGreen and close > hmaOnCL              and noTrade
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SIGNAUX DE SORTIE
+//  SIGNAUX DE SORTIE — close sur candle classique
+//  Sortie SHORT : HA vert + HA Close > HMA(50)
+//  Sortie LONG  : HA rouge + HA Close < HMA(50)
 // ─────────────────────────────────────────────────────────────────────────────
 
-exitShort = haIsGreen and haClose > hmaFastHA and strategy.position_size < 0
-exitLong  = haIsRed   and haClose < hmaFastHA and strategy.position_size > 0
+exitShort = haIsGreen and haClose > hmaOnHA and strategy.position_size < 0
+exitLong  = haIsRed   and haClose < hmaOnHA and strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CALCUL QUANTITÉ (2% risk compounding)
@@ -107,23 +94,19 @@ calcQty(slDist) =>
     slDist > 0 ? riskAmount / slDist : na
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SUIVI DU STOP LOSS (évalué à la clôture de bougie, pas en intrabar)
+//  STOP LOSS — évalué sur close de bougie (pas intrabar)
 // ─────────────────────────────────────────────────────────────────────────────
 
 var float shortSL = na
 var float longSL  = na
 
-// SL SHORT touché : le High de la bougie a dépassé le niveau SL
 slHitShort = strategy.position_size < 0 and not na(shortSL) and high >= shortSL
-
-// SL LONG touché : le Low de la bougie est passé sous le niveau SL
 slHitLong  = strategy.position_size > 0 and not na(longSL)  and low  <= longSL
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EXÉCUTION — toutes les sorties sur close de bougie
+//  EXÉCUTION — sorties avant entrées
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── SORTIES en premier ────────────────────────────────────────────────────────
 if exitShort
     strategy.close("Short", comment="TP ✓")
     shortSL := na
@@ -140,14 +123,13 @@ if slHitLong
     strategy.close("Long", comment="SL ✗")
     longSL := na
 
-// ── ENTRÉES (seulement si aucune position) ────────────────────────────────────
 if shortEntry
     slLevel = haHigh
     dist    = slLevel - close
     qty     = calcQty(dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
-        shortSL := slLevel   // Mémoriser le SL pour vérification à chaque close
+        shortSL := slLevel
 
 if longEntry
     slLevel = low
@@ -155,15 +137,14 @@ if longEntry
     qty     = calcQty(dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
-        longSL := slLevel    // Mémoriser le SL pour vérification à chaque close
+        longSL := slLevel
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  AFFICHAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-plot(hmaSlowCL, "HMA 50 (close)", color=color.new(color.blue,   0), linewidth=2)
-plot(hmaFastHA, "HMA 20 (HA)",   color=color.new(color.orange,  0), linewidth=1)
-plot(hmaSlowHA, "HMA 50 (HA)",   color=color.new(color.blue,   65), linewidth=1)
+plot(hmaOnCL, "HMA 50 (close)", color=color.new(color.blue,  0), linewidth=2)
+plot(hmaOnHA, "HMA 50 (HA)",   color=color.new(color.blue, 60), linewidth=1)
 
 plotshape(shortEntry, "▼ Short",      shape.triangledown, location.abovebar, color.new(color.red,    0), size=size.small)
 plotshape(longEntry,  "▲ Long",       shape.triangleup,   location.belowbar, color.new(color.green,  0), size=size.small)
