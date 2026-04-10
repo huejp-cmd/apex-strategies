@@ -102,11 +102,11 @@ longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow
 //         car en bas de tendance le HA vert précède toujours le passage de HMA20
 // ─────────────────────────────────────────────────────────────────────────────
 
-// EXIT SHORT : HA vire au vert (changement de couleur rouge→vert)
-exitShort = haIsGreen and haIsRed[1] and strategy.position_size < 0
+// EXIT SHORT : HA Close franchit HMA(20) à la hausse → close sur candle classique
+exitShort = haClose > hmaOnHA_fast and strategy.position_size < 0
 
-// EXIT LONG : HA vire au rouge ET HA Close < HMA(20)
-exitLong  = haIsRed and haClose < hmaOnHA_fast and strategy.position_size > 0
+// EXIT LONG : HA Close franchit HMA(20) à la baisse → close sur candle classique
+exitLong  = haClose < hmaOnHA_fast and strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GESTION DU STOP LOSS + BREAKEVEN
