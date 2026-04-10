@@ -79,12 +79,16 @@ classicGreen = close > open
 // ─────────────────────────────────────────────────────────────────────────────
 
 noTrade = strategy.opentrades == 0
+isShort = strategy.position_size < 0
+isLong  = strategy.position_size > 0
 
 // SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-shortEntry = classicRed   and haIsRed and haClose < hmaOnHA_slow and noTrade
+// Retournement autorisé : déclenché même si LONG ouvert → ferme le LONG et ouvre le SHORT
+shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow and (noTrade or isLong)
 
 // LONG : Classic verte + HA verte + HA Close > HMA(50)
-longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and noTrade
+// Retournement autorisé : déclenché même si SHORT ouvert → ferme le SHORT et ouvre le LONG
+longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and (noTrade or isShort)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
@@ -166,8 +170,13 @@ if slHitLong
 
 // ── Entrées ───────────────────────────────────────────────────────────────────
 if shortEntry
-    sl_dist      = haHigh - close
-    qty          = calcQty(sl_dist)
+    // Retournement : fermer le LONG si ouvert
+    if isLong
+        strategy.close("Long", comment="↕ Retournement")
+        longSL := na
+        longBE := false
+    sl_dist = haHigh - close
+    qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Short", strategy.short, qty=qty)
         shortSL       := haHigh
@@ -176,8 +185,13 @@ if shortEntry
         shortBE       := false
 
 if longEntry
-    sl_dist      = close - low
-    qty          = calcQty(sl_dist)
+    // Retournement : fermer le SHORT si ouvert
+    if isShort
+        strategy.close("Short", comment="↕ Retournement")
+        shortSL := na
+        shortBE := false
+    sl_dist = close - low
+    qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
         strategy.entry("Long", strategy.long, qty=qty)
         longSL        := low
