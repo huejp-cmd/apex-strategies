@@ -101,7 +101,7 @@ labBetUnits() =>
      array.get(labSeq, 0) + array.get(labSeq, sz - 1)
 
 // Mise à jour après clôture d'un trade
-curTrades = strategy.closedtrades.size()
+curTrades = strategy.closedtrades
 if curTrades > prevTrades
     lastProfit = strategy.closedtrades.profit(curTrades - 1)
     if lastProfit > 0
