@@ -82,12 +82,12 @@ isShort = strategy.position_size < 0
 isLong  = strategy.position_size > 0
 
 // SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-// Actif si : pas de position OU LONG ouvert (retournement) OU SHORT ouvert (rafraîchissement SL)
-shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow
+// Entrée si pas de SHORT ouvert (retournement LONG→SHORT autorisé)
+shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow and not isShort
 
 // LONG : Classic verte + HA verte + HA Close > HMA(50)
-// Actif si : pas de position OU SHORT ouvert (retournement) OU LONG ouvert (rafraîchissement SL)
-longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow
+// Entrée si pas de LONG ouvert (retournement SHORT→LONG autorisé)
+longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and not isLong
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
@@ -181,15 +181,11 @@ if slHitLong
 
 // ── Entrées ───────────────────────────────────────────────────────────────────
 if shortEntry
-    // Fermer toute position existante (retournement LONG→SHORT ou rafraîchissement SHORT)
+    // Retournement : fermer le LONG si ouvert
     if isLong
-        strategy.close("Long",  comment="↕ Retournement→Short")
+        strategy.close("Long", comment="↕ →Short")
         longSL := na
         longBE := false
-    if isShort
-        strategy.close("Short", comment="↻ MàJ Short")
-        shortSL := na
-        shortBE := false
     sl_dist = haHigh - close
     qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
@@ -200,15 +196,11 @@ if shortEntry
         shortBE       := false
 
 if longEntry
-    // Fermer toute position existante (retournement SHORT→LONG ou rafraîchissement LONG)
+    // Retournement : fermer le SHORT si ouvert
     if isShort
-        strategy.close("Short", comment="↕ Retournement→Long")
+        strategy.close("Short", comment="↕ →Long")
         shortSL := na
         shortBE := false
-    if isLong
-        strategy.close("Long",  comment="↻ MàJ Long")
-        longSL := na
-        longBE := false
     sl_dist = close - low
     qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
