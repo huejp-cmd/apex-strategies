@@ -35,8 +35,8 @@ strategy(
      default_qty_type        = strategy.fixed,
      default_qty_value       = 1,
      pyramiding              = 0,
-     process_orders_on_close = true,
-     calc_on_every_tick      = false,
+     process_orders_on_close = false,
+     calc_on_every_tick      = true,
      commission_type         = strategy.commission.percent,
      commission_value        = 0.05,
      slippage                = 1)
@@ -71,6 +71,7 @@ ddReduce2Pct  = input.float(3.0,     "Réduction 25% si DD ≥ %",   step=0.5,  
 apexDailyLim  = input.float(900.0,   "Arrêt si perte jour ≥ ($)", step=50,   group="Apex Circuit Breakers")
 apexDDLim     = input.float(1800.0,  "Arrêt si DD total  ≥ ($)",  step=100,  group="Apex Circuit Breakers")
 
+liveMode      = input.bool(false, "Mode live — ordre 5s avant clôture", group="Exécution")
 debugMode     = input.bool(false, "Mode debug (labels)", group="Debug")
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,6 +167,16 @@ totalDD  = strategy.initial_capital - strategy.equity
 tradingAllowed = dailyPnL > -apexDailyLim and totalDD < apexDDLim and sizeFactor > 0.0
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  TIMING D'EXÉCUTION
+//  Backtest : barstate.isconfirmed (clôture de bougie)
+//  Live     : 5 secondes avant la clôture estimée
+// ─────────────────────────────────────────────────────────────────────────────
+barDurMs   = time - nz(time[1], time)
+closeTimeMs = time + math.max(barDurMs, 1) - 1
+msLeft     = closeTimeMs - timenow
+execNow    = liveMode ? (msLeft <= 5000 and msLeft >= 0) : barstate.isconfirmed
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  ÉTAT DES POSITIONS
 // ─────────────────────────────────────────────────────────────────────────────
 isShort = strategy.position_size < 0
@@ -174,8 +185,8 @@ isLong  = strategy.position_size > 0
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX D'ENTRÉE (HA uniquement)
 // ─────────────────────────────────────────────────────────────────────────────
-shortEntry = haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed
-longEntry  = haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed
+shortEntry = haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed and execNow
+longEntry  = haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed and execNow
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE (HA + HMA20, exécution sur close classique)
