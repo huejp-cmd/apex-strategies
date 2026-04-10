@@ -96,9 +96,12 @@ if not labReady
 // Mise courante (en unités)
 labBetUnits() =>
     sz = array.size(labSeq)
-    sz == 0 ? 2.0 :
-     sz == 1 ? array.get(labSeq, 0) :
-     array.get(labSeq, 0) + array.get(labSeq, sz - 1)
+    float result = 2.0
+    if sz == 1
+        result := array.get(labSeq, 0)
+    else if sz >= 2
+        result := array.get(labSeq, 0) + array.get(labSeq, sz - 1)
+    result
 
 // Mise à jour après clôture d'un trade
 curTrades = strategy.closedtrades
@@ -312,8 +315,8 @@ var table dash = table.new(position.top_right, 2, 8, border_width=1, border_colo
 if barstate.islast
     // Labouchère
     labStr  = str.tostring(array.size(labSeq)) + " termes | mise: " + str.tostring(betUnits, "0.#") + "u"
-    riskStr = str.tostring(math.min(riskDollars, maxSLDollars), "0.0") + "$ (" +
-              str.tostring(math.min(riskDollars, maxSLDollars) / strategy.equity * 100, "0.00") + "%)"
+    riskActual = math.min(riskDollars, maxSLDollars)
+    riskStr = str.tostring(riskActual, "0.0") + "$ (" + str.tostring(riskActual / strategy.equity * 100, "0.00") + "%)"
 
     table.cell(dash, 0, 0, "LABOUCHÈRE",   bgcolor=color.navy,                 text_color=color.white, text_size=size.small)
     table.cell(dash, 1, 0, labStr,         bgcolor=color.navy,                 text_color=color.white, text_size=size.small)
@@ -343,7 +346,7 @@ if barstate.islast
                bgcolor=statusBg, text_color=color.white, text_size=size.small)
     // Séquence actuelle
     seqDisplay = array.size(labSeq) > 0 ? str.tostring(array.get(labSeq, 0), "0") : "?"
-    seqDisplay := seqDisplay + (array.size(labSeq) > 1 ? "–…–" + str.tostring(array.get(labSeq, array.size(labSeq)-1), "0") : "")
+    seqDisplay := seqDisplay + (array.size(labSeq) > 1 ? "..." + str.tostring(array.get(labSeq, array.size(labSeq)-1), "0") : "")
     table.cell(dash, 0, 7, "Séquence",     bgcolor=color.new(color.purple, 20), text_color=color.white, text_size=size.small)
     table.cell(dash, 1, 7, "[" + seqDisplay + "]",
                bgcolor=color.new(color.purple, 20), text_color=color.white, text_size=size.small)
