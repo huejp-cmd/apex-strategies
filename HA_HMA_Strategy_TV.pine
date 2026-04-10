@@ -127,9 +127,8 @@ if curTrades > prevTrades
     prevTrades := curTrades
 
 // Mise en dollars pour ce trade
-betUnits     = labBetUnits()
-riskDollars  = math.min(betUnits * labUnitPct * strategy.equity,
-                        maxRiskPct            * strategy.equity)
+betUnits    = labBetUnits()
+riskDollars = math.min(betUnits * labUnitPct * strategy.equity, maxRiskPct * strategy.equity)
 
 // SL max en dollars (0.05% du capital compound)
 maxSLDollars = maxSLPct * strategy.equity
