@@ -1,22 +1,24 @@
 // ============================================================================
-//  HA + HMA Strategy v2 — JP
+//  HA + HMA Strategy v3 — JP
 //  TradingView Pine Script v5
-//  Instrument : ETHUSDT.P (ou tout perp crypto)
+//  Instrument : ETHUSDT.P
 //  Timeframe  : 10M–15M recommandé
 //
-//  SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-//          SL = High bougie HA | TP = HA vert + HA Close > HMA(20) → close classic
+//  SHORT : Classic rouge + HA rouge (×2 consécutives) + HA Close < HMA(50)
+//          + HMA(50) en pente descendante + corps > X% ATR
+//          SL = High bougie HA | TP = HA vert + HA Close > HMA(20)
 //
-//  LONG  : Classic verte + Classic Close > HMA(50)  [sans filtre HA]
-//          SL = Low bougie classique | TP = HA rouge + HA Close < HMA(20) → close classic
+//  LONG  : Classic verte + Classic Close > HMA(50)
+//          + HMA(50) en pente montante + corps > X% ATR
+//          SL = Low bougie classique | TP = HA rouge + HA Close < HMA(20)
 //
-//  Capital : $50 000 | Risque : 2% par trade (compounding automatique)
-//  UNE SEULE position à la fois — pas de filtre horaire
+//  Capital : $50 000 | Risque : 2% par trade (compounding)
+//  UNE SEULE position à la fois
 // ============================================================================
 
 //@version=5
 strategy(
-     title                   = "HA + HMA Strategy v2 — JP",
+     title                   = "HA + HMA Strategy v3 — JP",
      overlay                 = true,
      initial_capital         = 50000,
      currency                = currency.USD,
@@ -32,9 +34,12 @@ strategy(
 //  PARAMÈTRES
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaSlowLen = input.int  (50,  "HMA Lente — période (filtre signal)", minval=5,  group="HMA")
-hmaFastLen = input.int  (20,  "HMA Rapide — période (condition TP)", minval=2,  group="HMA")
-riskPct    = input.float(2.0, "Risque par trade (%)", step=0.1, minval=0.1, maxval=10, group="Capital")
+hmaSlowLen  = input.int  (50,  "HMA Lente — période",           minval=5,   group="HMA")
+hmaFastLen  = input.int  (20,  "HMA Rapide — période (sortie)", minval=2,   group="HMA")
+atrLen      = input.int  (14,  "ATR — période",                 minval=5,   group="Filtres")
+bodyMinPct  = input.float(30.0,"Corps min (% de l'ATR)",        step=5.0, minval=5.0, maxval=100.0, group="Filtres",
+                          tooltip="Bougie ignorée si son corps < X% de l'ATR. Augmenter pour moins de signaux.")
+riskPct     = input.float(2.0, "Risque par trade (%)",          step=0.1, minval=0.1, maxval=10, group="Capital")
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  HEIKIN ASHI (calcul manuel)
@@ -46,23 +51,34 @@ haOpenV := na(haOpenV[1]) ? (open + close) / 2.0 : (haOpenV[1] + haClose[1]) / 2
 haHigh  = math.max(high, math.max(haOpenV, haClose))
 haLow   = math.min(low,  math.min(haOpenV, haClose))
 
-haIsRed   = haClose < haOpenV
+haIsRed   = haClose  < haOpenV
 haIsGreen = haClose >= haOpenV
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HMA (Hull Moving Average)
+//  HMA
 // ─────────────────────────────────────────────────────────────────────────────
 
-hmaSlowHA = ta.hma(haClose, hmaSlowLen)  // HMA(50) sur HA  — filtre SHORT
-hmaFastHA = ta.hma(haClose, hmaFastLen)  // HMA(20) sur HA  — condition sortie
-hmaSlowCL = ta.hma(close,   hmaSlowLen)  // HMA(50) sur close classique — filtre LONG
+hmaSlowHA = ta.hma(haClose, hmaSlowLen)
+hmaFastHA = ta.hma(haClose, hmaFastLen)
+hmaSlowCL = ta.hma(close,   hmaSlowLen)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VERROU : une seule position à la fois
-//  Utilise strategy.opentrades (plus fiable que position_size avec process_on_close)
+//  FILTRES
 // ─────────────────────────────────────────────────────────────────────────────
 
-noTrade = strategy.opentrades == 0
+// Pente HMA : SHORT si HMA descend, LONG si HMA monte
+hmaBearish = hmaSlowHA < hmaSlowHA[1]   // HMA(HA) en baisse  → confirme SHORT
+hmaBullish = hmaSlowCL > hmaSlowCL[1]   // HMA(close) en hausse → confirme LONG
+
+// Corps minimum basé sur ATR
+atr     = ta.atr(atrLen)
+bodyMin = atr * bodyMinPct / 100.0
+body    = math.abs(close - open)
+bodyOk  = body >= bodyMin
+
+// Confirmation HA : 2 bougies consécutives de même couleur
+haConfirmRed   = haIsRed   and haIsRed[1]    // 2 HA rouges de suite
+haConfirmGreen = haIsGreen and haIsGreen[1]  // 2 HA vertes de suite
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  COULEURS CLASSIQUES
@@ -75,8 +91,13 @@ classicGreen = close > open
 //  SIGNAUX D'ENTRÉE
 // ─────────────────────────────────────────────────────────────────────────────
 
-shortEntry = classicRed   and haIsRed   and haClose < hmaSlowHA and noTrade
-longEntry  = classicGreen and close > hmaSlowCL                 and noTrade
+noTrade = strategy.opentrades == 0
+
+// SHORT : Classic rouge + 2 HA rouges consécutives + HA sous HMA50 + HMA descend + corps ok
+shortEntry = classicRed   and haConfirmRed   and haClose < hmaSlowHA and hmaBearish and bodyOk and noTrade
+
+// LONG : Classic verte + Classic > HMA50 + HMA monte + corps ok (sans confirmation HA)
+longEntry  = classicGreen and close > hmaSlowCL               and hmaBullish and bodyOk and noTrade
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE
@@ -86,7 +107,7 @@ exitShort = haIsGreen and haClose > hmaFastHA and strategy.position_size < 0
 exitLong  = haIsRed   and haClose < hmaFastHA and strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CALCUL DE LA QUANTITÉ (2% risk compounding)
+//  CALCUL QUANTITÉ (2% risk compounding)
 // ─────────────────────────────────────────────────────────────────────────────
 
 calcQty(slDist) =>
@@ -94,18 +115,14 @@ calcQty(slDist) =>
     slDist > 0 ? riskAmount / slDist : na
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EXÉCUTION DES ORDRES
-//  Sorties AVANT entrées sur le même bar
+//  EXÉCUTION — sorties avant entrées
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── SORTIES TP ───────────────────────────────────────────────────────────────
 if exitShort
     strategy.close("Short", comment="TP ✓")
-
 if exitLong
     strategy.close("Long", comment="TP ✓")
 
-// ── ENTRÉES (seulement si aucun trade ouvert) ─────────────────────────────────
 if shortEntry
     slLevel = haHigh
     dist    = slLevel - close
