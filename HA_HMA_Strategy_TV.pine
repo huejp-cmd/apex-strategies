@@ -183,16 +183,21 @@ isShort = strategy.position_size < 0
 isLong  = strategy.position_size > 0
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SIGNAUX D'ENTRÉE (HA uniquement)
+//  SIGNAUX — détection (affichage) séparée de l'exécution (timing)
 // ─────────────────────────────────────────────────────────────────────────────
-shortEntry = haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed and execNow
-longEntry  = haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed and execNow
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  SIGNAUX DE SORTIE (HA + HMA20, exécution sur close classique)
-// ─────────────────────────────────────────────────────────────────────────────
-exitShort = haIsGreen and haIsRed[1]   and haClose > hmaOnHA_fast and strategy.position_size < 0
-exitLong  = haIsRed   and haIsGreen[1] and haClose < hmaOnHA_fast and strategy.position_size > 0
+// Détection pure (pour affichage sur le graphique classique)
+shortSignal = haIsRed   and haClose < hmaOnHA_slow and not isShort and tradingAllowed
+longSignal  = haIsGreen and haClose > hmaOnHA_slow and not isLong  and tradingAllowed
+
+exitShortSignal = haIsGreen and haIsRed[1]   and haClose > hmaOnHA_fast and strategy.position_size < 0
+exitLongSignal  = haIsRed   and haIsGreen[1] and haClose < hmaOnHA_fast and strategy.position_size > 0
+
+// Exécution effective (timing : clôture bar ou 5s avant)
+shortEntry = shortSignal       and execNow
+longEntry  = longSignal        and execNow
+exitShort  = exitShortSignal   and execNow
+exitLong   = exitLongSignal    and execNow
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  STOP LOSS + BREAKEVEN (prix classiques)
@@ -344,10 +349,15 @@ if debugMode
 plot(hmaOnHA_slow, "HMA 50 (HA)", color=color.new(color.blue,   0), linewidth=2)
 plot(hmaOnHA_fast, "HMA 20 (HA)", color=color.new(color.orange, 0), linewidth=1)
 
-plotshape(shortEntry, "▼ Short",      shape.triangledown, location.abovebar, color.new(color.red,    0), size=size.small)
-plotshape(longEntry,  "▲ Long",       shape.triangleup,   location.belowbar, color.new(color.green,  0), size=size.small)
-plotshape(exitShort,  "✕ Exit Short", shape.xcross,       location.abovebar, color.new(color.orange, 0), size=size.tiny)
-plotshape(exitLong,   "✕ Exit Long",  shape.xcross,       location.belowbar, color.new(color.orange, 0), size=size.tiny)
+// Entrées — triangles larges visibles sur candles classiques
+plotshape(shortSignal,      "▼ SHORT",  shape.triangledown, location.abovebar, color.new(color.red,    0), size=size.normal, text="S", textcolor=color.white)
+plotshape(longSignal,       "▲ LONG",   shape.triangleup,   location.belowbar, color.new(color.green,  0), size=size.normal, text="L", textcolor=color.white)
+// Sorties HA
+plotshape(exitShortSignal,  "✕ Exit S", shape.xcross, location.abovebar, color.new(color.orange, 0), size=size.small)
+plotshape(exitLongSignal,   "✕ Exit L", shape.xcross, location.belowbar, color.new(color.orange, 0), size=size.small)
+// TP ATR / SL hits
+plotshape(tpHitShort or tpHitLong, "TP", shape.circle, location.abovebar, color.new(color.lime, 0), size=size.tiny)
+plotshape(slHitShort or slHitLong, "SL", shape.circle, location.abovebar, color.new(color.red,  0), size=size.tiny)
 
 bgcolor(not tradingAllowed ? color.new(color.red, 88) : na, title="⛔ Apex : trading suspendu")
 
