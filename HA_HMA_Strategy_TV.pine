@@ -20,6 +20,7 @@ strategy(
      overlay             = true,
      initial_capital     = 50000,
      currency            = currency.USD,
+     pyramiding          = 0,
      process_orders_on_close = true,
      calc_on_every_tick  = false,
      commission_type     = strategy.commission.percent,
