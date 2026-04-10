@@ -78,17 +78,16 @@ classicGreen = close > open
 //  SIGNAUX D'ENTRÉE
 // ─────────────────────────────────────────────────────────────────────────────
 
-noTrade = strategy.opentrades == 0
 isShort = strategy.position_size < 0
 isLong  = strategy.position_size > 0
 
 // SHORT : Classic rouge + HA rouge + HA Close < HMA(50)
-// Retournement autorisé : déclenché même si LONG ouvert → ferme le LONG et ouvre le SHORT
-shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow and (noTrade or isLong)
+// Actif si : pas de position OU LONG ouvert (retournement) OU SHORT ouvert (rafraîchissement SL)
+shortEntry = classicRed   and haIsRed   and haClose < hmaOnHA_slow
 
 // LONG : Classic verte + HA verte + HA Close > HMA(50)
-// Retournement autorisé : déclenché même si SHORT ouvert → ferme le SHORT et ouvre le LONG
-longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow and (noTrade or isShort)
+// Actif si : pas de position OU SHORT ouvert (retournement) OU LONG ouvert (rafraîchissement SL)
+longEntry  = classicGreen and haIsGreen and haClose > hmaOnHA_slow
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SIGNAUX DE SORTIE — close sur candle classique
@@ -170,11 +169,15 @@ if slHitLong
 
 // ── Entrées ───────────────────────────────────────────────────────────────────
 if shortEntry
-    // Retournement : fermer le LONG si ouvert
+    // Fermer toute position existante (retournement LONG→SHORT ou rafraîchissement SHORT)
     if isLong
-        strategy.close("Long", comment="↕ Retournement")
+        strategy.close("Long",  comment="↕ Retournement→Short")
         longSL := na
         longBE := false
+    if isShort
+        strategy.close("Short", comment="↻ MàJ Short")
+        shortSL := na
+        shortBE := false
     sl_dist = haHigh - close
     qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
@@ -185,11 +188,15 @@ if shortEntry
         shortBE       := false
 
 if longEntry
-    // Retournement : fermer le SHORT si ouvert
+    // Fermer toute position existante (retournement SHORT→LONG ou rafraîchissement LONG)
     if isShort
-        strategy.close("Short", comment="↕ Retournement")
+        strategy.close("Short", comment="↕ Retournement→Long")
         shortSL := na
         shortBE := false
+    if isLong
+        strategy.close("Long",  comment="↻ MàJ Long")
+        longSL := na
+        longBE := false
     sl_dist = close - low
     qty     = calcQty(sl_dist)
     if not na(qty) and qty > 0.0
